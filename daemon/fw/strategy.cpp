@@ -198,6 +198,7 @@ Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data, con
 {
   BOOST_ASSERT(pitEntry->getInterest().matchesData(data));
 
+  NFD_LOG_DEBUG("sendData pitEntry=" << pitEntry->getName());
   // delete the PIT entry's in-record based on outFace,
   // since Data is sent to outFace from which the Interest was received
   pitEntry->deleteInRecord(outFace);
@@ -211,8 +212,10 @@ Strategy::sendDataToAll(const shared_ptr<pit::Entry>& pitEntry, const Face& inFa
   std::set<Face*> pendingDownstreams;
   auto now = time::steady_clock::now();
 
+  NFD_LOG_DEBUG("sendDataToAll pitEntry=" << pitEntry->getName());
   // remember pending downstreams
   for (const pit::InRecord& inRecord : pitEntry->getInRecords()) {
+    NFD_LOG_DEBUG("pit::InRecord: " << pitEntry->getName());
     if (inRecord.getExpiry() > now) {
       if (inRecord.getFace().getId() == inFace.getId() &&
           inRecord.getFace().getLinkType() != ndn::nfd::LINK_TYPE_AD_HOC) {
@@ -223,6 +226,7 @@ Strategy::sendDataToAll(const shared_ptr<pit::Entry>& pitEntry, const Face& inFa
   }
 
   for (const Face* pendingDownstream : pendingDownstreams) {
+    NFD_LOG_DEBUG("pendingDownStream: " << pitEntry->getName());
     this->sendData(pitEntry, data, *pendingDownstream);
   }
 }

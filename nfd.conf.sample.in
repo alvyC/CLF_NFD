@@ -149,7 +149,7 @@ face_system
     mcast_port 56363 ; UDP multicast port number (IPv4)
     mcast_group_v6 ff02::1234 ; UDP multicast group (IPv6)
     mcast_port_v6 56363 ; UDP multicast port number (IPv6)
-    mcast_ad_hoc no ; set to 'yes' to make all UDP multicast faces "ad hoc", default 'no'
+    mcast_ad_hoc yes ; set to 'yes' to make all UDP multicast faces "ad hoc", default 'no'
 
     ; Whitelist and blacklist can contain, in no particular order:
     ; - interface names, including wildcard patterns (e.g., 'ifname eth0', 'ifname en*', 'ifname wlp?s0')

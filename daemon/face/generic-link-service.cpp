@@ -93,6 +93,7 @@ GenericLinkService::sendLpPacket(lp::Packet&& pkt)
 void
 GenericLinkService::doSendInterest(const Interest& interest)
 {
+  std::cout << "GenericLinkService::doSendInterest: " << interest << std::endl;
   lp::Packet lpPacket(interest.wireEncode());
 
   encodeLpFields(interest, lpPacket);
@@ -394,6 +395,11 @@ GenericLinkService::decodeInterest(const Block& netPkt, const lp::Packet& firstP
     ++this->nInNetInvalid;
     NFD_LOG_FACE_WARN("received PrefixAnnouncement with Interest: DROP");
     return;
+  }
+
+  if (firstPkt.has<lp::LocationField>()) {
+    std::cout << "GenericLinkService::decodeInterest(): tag lp::LocationField()" << std::endl;
+    interest->setTag(make_shared<lp::LocationTag>(firstPkt.get<lp::LocationField>()));
   }
 
   this->receiveInterest(*interest);

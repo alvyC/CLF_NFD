@@ -116,6 +116,9 @@ public:
   Entry*
   getParent(const Entry& child);
 
+  std::vector<Entry*>
+  getAllNodesMe(const Entry& root);
+  
   /** \brief perform a longest prefix match for \p name
    */
   Entry*

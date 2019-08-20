@@ -26,7 +26,9 @@
 #ifndef NFD_DAEMON_FW_CLF_STRATEGY_HPP
 #define NFD_DAEMON_FW_CLF_STRATEGY_HPP
 
+#include "clf-vanet-measurements.hpp"
 #include "strategy.hpp"
+#include "clf-prefix-location-tree.hpp"
 
 #include <ndn-cxx/lp/location-header.hpp>
 #include <ndn-cxx/util/scheduler.hpp>
@@ -38,6 +40,7 @@
 
 namespace nfd {
 namespace fw {
+namespace clf {
 
 /** \brief a forwarding strategy that forwards Interest to all FIB nexthops
  */
@@ -58,15 +61,39 @@ public:
   afterReceiveNack(const Face& inFace, const lp::Nack& nack,
                    const shared_ptr<pit::Entry>& pitEntry) override;
  
+  void
+  afterReceiveData(const shared_ptr<pit::Entry>& pitEntry,
+                   const Face& inFace, const Data& data) override;
+  void
+  onLoopedInterest(const shared_ptr<pit::Entry>& pitEntry, const Face& outFace, const Interest& interest) override;
+
+  void
+  onPitExpiration(const shared_ptr<pit::Entry>& pitEntry) override;
+
 private: 
   void
   afterReceiveInterestBroadcast(const Face& inFace, const Interest& interest,
                                 const shared_ptr<pit::Entry>& pitEntry);
   void
-  afterReceiveInterestLocation(const Face& inFace, const Interest& interest,
-                               const shared_ptr<pit::Entry>& pitEntry);
+  afterReceiveInterestVndn(const Face& inFace, const Interest& interest,
+                           const shared_ptr<pit::Entry>& pitEntry);
 
- // This function converts decimal degrees to radians
+  void
+  afterReceiveInterestNavigo(const Face& inFace, const Interest& interest,
+                             const shared_ptr<pit::Entry>& pitEntry);
+  
+  void
+  afterReceiveInterestClf(const Face& inFace, const Interest& interest,
+                          const shared_ptr<pit::Entry>& pitEntry);
+  void
+  afterReceiveDataNormal(const shared_ptr<pit::Entry>& pitEntry,
+                         const Face& inFace, const Data& data);
+  void
+  afterReceiveDataClf(const shared_ptr<pit::Entry>& pitEntry,
+                      const Face& inFace, const Data& data);
+
+
+  // This function converts decimal degrees to radians
   double deg2rad(double deg) {
     return (deg * M_PI / 180);
   }
@@ -77,14 +104,13 @@ private:
   }
 
   double
+  calculateDistanceEuclid(double x1, double y1, double x2, double y2); 
+
+  double
   calculateDistance(double lat1d, double lon1d,
                     double lat2d, double lon2d);
 
-  std::pair<double, double>
-  getMyLocation() {
-    return {0, 0}; // latitude, longitude
-  }
-
+    
   double
   getLocationScore(ndn::Location pl, ndn::Location dl, 
                    ndn::Location ml) {
@@ -92,15 +118,26 @@ private:
                                               ml.getLatitude(), ml.getLongitude());
     double distanceFromPrev = calculateDistance(pl.getLatitude(), pl.getLongitude(),
                                                 dl.getLatitude(), dl.getLongitude()); 
-    std::cout << "distanceFromMe: " << distanceFromMe  << std::endl; 
-    std::cout << "distanceFromPrev: " << distanceFromPrev  << std::endl; 
-    return distanceFromMe/std::max(distanceFromMe, distanceFromPrev); 
+    
+    return (1 - (distanceFromMe/std::max(distanceFromMe, distanceFromPrev))); 
   }
   
   double
-  getCentralityScore(ndn::Name interestName) {
-    return 0.0;
+  getLocationScoreVndn(ndn::Location pl, ndn::Location ml) {
+    double distanceFromMe = calculateDistance(pl.getLatitude(), pl.getLongitude(),
+                                              ml.getLatitude(), ml.getLongitude());
+    
+    std::cout << "distanceFromMeToPrev: " << distanceFromMe  << std::endl; 
+    
+    //return distanceFromMe/std::max(distanceFromMe, distanceFromPrev);
+    return 0.0; 
   }
+ 
+  double 
+  getCentralityScore(const shared_ptr<pit::Entry>& pitEntry, FaceId faceId);
+  
+  ndn::Location
+  getDestLocation(const shared_ptr<pit::Entry>& pitEntry, FaceId faceId); 
 
   double
   calculateTimer(double lat1d, double lon1d,
@@ -110,17 +147,22 @@ private:
   forwardInterest(const Interest& interest,
                   const shared_ptr<pit::Entry>& pitEntry,
                   //TODO: FaceInfo* info,
-                  Face& outFace);
+                  Face* outFace);
 
 private:
+  VanetMeasurements m_measurements; 
+  
   const double earthRadiusKm = 6371;
   //ndn::DummyIoService m_ioService;
   //ndn::Scheduler m_scheduler;
-  std::unordered_map<ndn::Name, ndn::EventId> m_scheduledInterstPool;
+  std::unordered_map<ndn::Name, ns3::EventId> m_scheduledInterstPool;
+  
+  PrefixLocationTree m_prefixLocation;    
 
   static const double ALPHA;
 };
 
+} // namespace clf
 } // namespace fw
 } // namespace nfd
 

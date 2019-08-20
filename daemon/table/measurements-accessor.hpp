@@ -70,6 +70,9 @@ public:
   Entry*
   getParent(const Entry& child);
 
+  const std::vector<Entry*>
+  getAllNodesMe(const Entry& root);
+  
   /** \brief perform a longest prefix match for \p name
    */
   Entry*
@@ -140,6 +143,12 @@ inline Entry*
 MeasurementsAccessor::getParent(const Entry& child)
 {
   return this->filter(m_measurements.getParent(child));
+}
+
+inline const std::vector<Entry*>
+MeasurementsAccessor::getAllNodesMe(const Entry& parent)
+{
+  return m_measurements.getAllNodesMe(parent);
 }
 
 inline Entry*

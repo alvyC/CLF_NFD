@@ -28,6 +28,8 @@
 
 #include "route.hpp"
 
+#include <ndn-cxx/location.hpp>
+
 #include <list>
 
 namespace nfd {
@@ -52,7 +54,7 @@ public:
 
   const Name&
   getName() const;
-
+  
   shared_ptr<RibEntry>
   getParent() const;
 
@@ -203,7 +205,7 @@ private:
   shared_ptr<RibEntry> m_parent;
   RouteList m_routes;
   RouteList m_inheritedRoutes;
-
+  
   /** \brief The number of routes on this namespace with the capture flag set.
    *
    *  This count is used to check if the namespace will block inherited routes.

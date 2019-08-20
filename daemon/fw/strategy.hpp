@@ -223,6 +223,14 @@ public: // triggers
   virtual void
   afterReceiveNack(const Face& inFace, const lp::Nack& nack,
                    const shared_ptr<pit::Entry>& pitEntry);
+  
+  // my change
+  virtual void
+  onLoopedInterest(const shared_ptr<pit::Entry>& pitEntry, const Face& outFace, const Interest& interest);
+
+   virtual void
+   onPitExpiration(const shared_ptr<pit::Entry>& pitEntry) {
+   }
 
   /** \brief trigger after Interest dropped for exceeding allowed retransmissions
    *

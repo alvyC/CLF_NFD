@@ -188,6 +188,13 @@ Strategy::afterReceiveNack(const Face& inFace, const lp::Nack& nack,
 }
 
 void
+Strategy::onLoopedInterest(const shared_ptr<pit::Entry>& pitEntry,
+                           const Face& inFace, const Interest& interest)
+{
+  NFD_LOG_DEBUG("onLoopedInterest inFace=" << inFace.getId() << " name=" << interest.getName());
+}
+
+void
 Strategy::onDroppedInterest(const Face& outFace, const Interest& interest)
 {
   NFD_LOG_DEBUG("onDroppedInterest outFace=" << outFace.getId() << " name=" << interest.getName());

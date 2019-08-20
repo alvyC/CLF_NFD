@@ -35,6 +35,8 @@
 
 #include "face/null-face.hpp"
 
+#include "ns3/simulator.h"
+
 namespace nfd {
 
 NFD_LOG_INIT(Forwarder);
@@ -88,7 +90,7 @@ Forwarder::onIncomingInterest(Face& inFace, const Interest& interest)
 {
   // receive Interest
   NFD_LOG_DEBUG("onIncomingInterest face=" << inFace.getId() <<
-                " interest=" << interest.getName());
+                " interest=" << interest.getName() << " nonce: " << interest.getNonce());
   interest.setTag(make_shared<lp::IncomingFaceIdTag>(inFace.getId()));
   ++m_counters.nInInterests;
 
@@ -124,6 +126,7 @@ Forwarder::onIncomingInterest(Face& inFace, const Interest& interest)
   // detect duplicate Nonce in PIT entry
   int dnw = fw::findDuplicateNonce(*pitEntry, interest.getNonce(), inFace);
   bool hasDuplicateNonceInPit = dnw != fw::DUPLICATE_NONCE_NONE;
+  //NFD_LOG_DEBUG(dnw << ", "  << hasDuplicateNonceInPit);
   if (inFace.getLinkType() == ndn::nfd::LINK_TYPE_POINT_TO_POINT) {
     // for p2p face: duplicate Nonce from same incoming face is not loop
     hasDuplicateNonceInPit = hasDuplicateNonceInPit && !(dnw & fw::DUPLICATE_NONCE_IN_SAME);
@@ -131,7 +134,12 @@ Forwarder::onIncomingInterest(Face& inFace, const Interest& interest)
   if (hasDuplicateNonceInPit) {
     // goto Interest loop pipeline
     this->onInterestLoop(inFace, interest);
-    return;
+    
+    // my changes: dispatch looped interest to strategy
+    this->dispatchToStrategy(*pitEntry,
+      [&] (fw::Strategy& strategy) { strategy.onLoopedInterest(pitEntry, inFace, interest); });
+
+    return; // commented out this line for my use, so looped interest is passed to strategy.
   }
 
   // is pending?
@@ -278,6 +286,12 @@ Forwarder::onInterestFinalize(const shared_ptr<pit::Entry>& pitEntry)
     ++m_counters.nUnsatisfiedInterests;
   }
 
+  // my changes: dispatch to strategy before deleting PIT
+  if (!pitEntry->isSatisfied) {
+  this->dispatchToStrategy(*pitEntry,
+      [&] (fw::Strategy& strategy) { strategy.onPitExpiration(pitEntry); });
+  }
+
   // PIT delete
   scheduler::cancel(pitEntry->expiryTimer);
   m_pit.erase(pitEntry.get());
@@ -309,15 +323,16 @@ Forwarder::onIncomingData(Face& inFace, const Data& data)
     return;
   }
 
+  
   shared_ptr<Data> dataCopyWithoutTag = make_shared<Data>(data);
   dataCopyWithoutTag->removeTag<lp::HopCountTag>();
 
   // CS insert
-  if (m_csFromNdnSim == nullptr)
+  if (m_csFromNdnSim == nullptr) 
     m_cs.insert(*dataCopyWithoutTag);
   else
     m_csFromNdnSim->Add(dataCopyWithoutTag);
-
+  
   // when only one PIT entry is matched, trigger strategy: after receive Data
   if (pitMatches.size() == 1) {
     auto& pitEntry = pitMatches.front();
@@ -554,7 +569,7 @@ Forwarder::setExpiryTimer(const shared_ptr<pit::Entry>& pitEntry, time::millisec
   BOOST_ASSERT(duration >= 0_ms);
 
   scheduler::cancel(pitEntry->expiryTimer);
-
+  NFD_LOG_DEBUG(pitEntry->getInterest()); // my change
   pitEntry->expiryTimer = scheduler::schedule(duration, [=] { onInterestFinalize(pitEntry); });
 }
 

@@ -93,7 +93,7 @@ GenericLinkService::sendLpPacket(lp::Packet&& pkt)
 void
 GenericLinkService::doSendInterest(const Interest& interest)
 {
-  std::cout << "GenericLinkService::doSendInterest: " << interest << std::endl;
+  //std::cout << "GenericLinkService::doSendInterest: " << interest << std::endl;
   lp::Packet lpPacket(interest.wireEncode());
 
   encodeLpFields(interest, lpPacket);
@@ -104,6 +104,7 @@ GenericLinkService::doSendInterest(const Interest& interest)
 void
 GenericLinkService::doSendData(const Data& data)
 {
+  //std::cout << "GenericLinkService::doSendData: " << data.getName() << std::endl;
   lp::Packet lpPacket(data.wireEncode());
 
   encodeLpFields(data, lpPacket);
@@ -125,6 +126,7 @@ GenericLinkService::doSendNack(const lp::Nack& nack)
 void
 GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lpPacket)
 {
+  //std::cout << "GenericLinkService::encodeLpFields." << std::endl;
   if (m_options.allowLocalFields) {
     shared_ptr<lp::IncomingFaceIdTag> incomingFaceIdTag = netPkt.getTag<lp::IncomingFaceIdTag>();
     if (incomingFaceIdTag != nullptr) {
@@ -155,6 +157,12 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
   }
   else {
     lpPacket.add<lp::HopCountTagField>(0);
+  }
+
+  shared_ptr<lp::LocationTag> locationTag = netPkt.getTag<lp::LocationTag>();
+  if (locationTag != nullptr) {
+    //std::cout << "Encode Location Tag" << std::endl;
+    lpPacket.add<lp::LocationField>(*locationTag);
   }
 }
 
@@ -398,7 +406,7 @@ GenericLinkService::decodeInterest(const Block& netPkt, const lp::Packet& firstP
   }
 
   if (firstPkt.has<lp::LocationField>()) {
-    std::cout << "GenericLinkService::decodeInterest(): tag lp::LocationField()" << std::endl;
+    //std::cout << "GenericLinkService::decodeInterest(): tag lp::LocationField()" << std::endl;
     interest->setTag(make_shared<lp::LocationTag>(firstPkt.get<lp::LocationField>()));
   }
 
@@ -457,6 +465,14 @@ GenericLinkService::decodeData(const Block& netPkt, const lp::Packet& firstPkt)
     else {
       NFD_LOG_FACE_WARN("received PrefixAnnouncement, but self-learning disabled: IGNORE");
     }
+  }
+  
+  if (firstPkt.has<lp::LocationField>()) {
+    //std::cout << "GenericLinkService::decodeData(): tag lp::LocationField()" << std::endl;
+    data->setTag(make_shared<lp::LocationTag>(firstPkt.get<lp::LocationField>()));
+  }
+  else {
+    NFD_LOG_FACE_DEBUG("Location header is not available in the data.");
   }
 
   this->receiveData(*data);

@@ -23,6 +23,8 @@
  * NFD, e.g., in COPYING.md file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <queue>
+
 #include "measurements.hpp"
 #include "name-tree.hpp"
 #include "pit-entry.hpp"
@@ -87,6 +89,38 @@ Measurements::getParent(const Entry& child)
   name_tree::Entry* nte = nteChild->getParent();
   BOOST_ASSERT(nte != nullptr);
   return &this->get(*nte);
+}
+
+std::vector<Entry*>
+Measurements::getAllNodesMe(const Entry& root)
+{
+  name_tree::Entry* nteRoot = m_nameTree.getEntry(root);
+  Entry* rootMe = &this->get(*nteRoot);
+
+  std::queue<name_tree::Entry*> nameTreeQ;
+
+  nameTreeQ.push(nteRoot);
+
+  std::vector<Entry*> nodesMe;
+  nodesMe.push_back(rootMe);
+  while(!nameTreeQ.empty()) {
+    name_tree::Entry* nteParent = nameTreeQ.front();
+    nameTreeQ.pop();
+
+    std::vector<name_tree::Entry*> children = nteParent->getChildren();
+    
+    for (auto child : children) {
+      // push the child to the queue 
+      nameTreeQ.push(child);
+
+      // convert name table entry to measurement table entry
+      Entry* childMe = &this->get(*child);
+      
+      // then store it to the list of of measurements
+      nodesMe.push_back(childMe); 
+    }
+  }
+  return nodesMe;
 }
 
 template<typename K>

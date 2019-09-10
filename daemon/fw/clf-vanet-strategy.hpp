@@ -114,12 +114,12 @@ private:
   double
   getLocationScore(ndn::Location pl, ndn::Location dl, 
                    ndn::Location ml) {
-    double distanceFromMe = calculateDistance(pl.getLatitude(), pl.getLongitude(),
-                                              ml.getLatitude(), ml.getLongitude());
-    double distanceFromPrev = calculateDistance(pl.getLatitude(), pl.getLongitude(),
-                                                dl.getLatitude(), dl.getLongitude()); 
-    
-    return (1 - (distanceFromMe/std::max(distanceFromMe, distanceFromPrev))); 
+    double distanceFromMeToDest = calculateDistanceEuclid(dl.getLatitude(), dl.getLongitude(),
+                                             ml.getLatitude(), ml.getLongitude());
+    double distanceFromPrevToDest = calculateDistanceEuclid(pl.getLatitude(), pl.getLongitude(),
+                                               dl.getLatitude(), dl.getLongitude());
+
+    return (1 - (distanceFromMeToDest/std::max(distanceFromMeToDest, distanceFromPrevToDest))); 
   }
   
   double

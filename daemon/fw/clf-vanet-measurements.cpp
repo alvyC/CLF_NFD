@@ -352,7 +352,7 @@ VanetMeasurements::updateScoreAndLocation(const fib::Entry& fibEntry, ndn::Name 
   }
 }
 
-// called when PIT expires; update score for longest matched entry
+// called when PIT expires; update score for longest matched entry (can be deleted; not used anymore))
 void
 VanetMeasurements::updateScoreAndLocationLongestMatched(const fib::Entry& fibEntry, ndn::Name namePrefix, 
                                           FaceId faceId)

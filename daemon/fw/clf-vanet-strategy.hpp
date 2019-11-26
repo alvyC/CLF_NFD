@@ -74,6 +74,11 @@ private:
   void
   afterReceiveInterestBroadcast(const Face& inFace, const Interest& interest,
                                 const shared_ptr<pit::Entry>& pitEntry);
+  
+  void
+  afterReceiveInterestBroadcastRandom(const Face& inFace, const Interest& interest,
+                                      const shared_ptr<pit::Entry>& pitEntry);
+  
   void
   afterReceiveInterestVndn(const Face& inFace, const Interest& interest,
                            const shared_ptr<pit::Entry>& pitEntry);
@@ -91,7 +96,17 @@ private:
   void
   afterReceiveDataClf(const shared_ptr<pit::Entry>& pitEntry,
                       const Face& inFace, const Data& data);
-
+  
+  void
+  afterContentStoreHit(const shared_ptr<pit::Entry>& pitEntry,
+                       const Face& inFace, const Data& data);
+  void
+  sendDataToAll(const shared_ptr<pit::Entry>& pitEntry, 
+                const Face& inFace, const Data& data);
+  
+  void
+  invokeSendData(const shared_ptr<pit::Entry>& pitEntry, 
+                 const Face* outFace, const Data& data);
 
   // This function converts decimal degrees to radians
   double deg2rad(double deg) {
@@ -156,8 +171,11 @@ private:
   //ndn::DummyIoService m_ioService;
   //ndn::Scheduler m_scheduler;
   std::unordered_map<ndn::Name, ns3::EventId> m_scheduledInterstPool;
+  std::unordered_map<ndn::Name, ns3::EventId> m_scheduledDataPool;
   
   PrefixLocationTree m_prefixLocation;    
+  
+  int noOfNeighbors;
 
   static const double ALPHA;
 };

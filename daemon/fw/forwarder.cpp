@@ -139,7 +139,7 @@ Forwarder::onIncomingInterest(Face& inFace, const Interest& interest)
     this->dispatchToStrategy(*pitEntry,
       [&] (fw::Strategy& strategy) { strategy.onLoopedInterest(pitEntry, inFace, interest); });
 
-    return; // commented out this line for my use, so looped interest is passed to strategy.
+    return; 
   }
 
   // is pending?
@@ -322,7 +322,6 @@ Forwarder::onIncomingData(Face& inFace, const Data& data)
     this->onDataUnsolicited(inFace, data);
     return;
   }
-
   
   shared_ptr<Data> dataCopyWithoutTag = make_shared<Data>(data);
   dataCopyWithoutTag->removeTag<lp::HopCountTag>();

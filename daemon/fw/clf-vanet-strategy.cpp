@@ -44,6 +44,8 @@ NFD_REGISTER_STRATEGY(ClfStrategy);
 NFD_LOG_INIT(ClfStrategy);
 
 const double ClfStrategy::ALPHA = 0.5;
+//const double ClfStrategy::ALPHA = 1; // no centrality (greedy forwarding)
+//const double ClfStrategy::ALPHA = 0; // no location
 
 ClfStrategy::ClfStrategy(Forwarder& forwarder, const Name& name)
   : Strategy(forwarder)
@@ -72,10 +74,17 @@ void
 ClfStrategy::afterReceiveInterest(const Face& inFace, const Interest& interest,
                                   const shared_ptr<pit::Entry>& pitEntry)
 {
-  //afterReceiveInterestBroadcast(inFace, interest, pitEntry);
-  //afterReceiveInterestVndn(inFace, interest, pitEntry);
-  //afterReceiveInterestNavigo(inFace, interest, pitEntry);
-  afterReceiveInterestClf(inFace, interest, pitEntry);
+  if (interest.getName().get(0).toUri() == "neighbor") { // strategy is asking for number of beighbors
+    noOfNeighbors = std::stoi(interest.getName().get(1).toUri()); 
+    NFD_LOG_DEBUG("Update number of neighbors to  " << noOfNeighbors);
+  }
+  else {
+    //afterReceiveInterestBroadcast(inFace, interest, pitEntry);
+    //afterReceiveInterestBroadcastRandom(inFace, interest, pitEntry);
+    //afterReceiveInterestVndn(inFace, interest, pitEntry);
+    //afterReceiveInterestNavigo(inFace, interest, pitEntry);
+    afterReceiveInterestClf(inFace, interest, pitEntry);
+  }
 }
 
 void
@@ -91,20 +100,44 @@ ClfStrategy::onLoopedInterest(const shared_ptr<pit::Entry>& pitEntry, const Face
 {
   NFD_LOG_DEBUG("onLoopedInterest inFace=" << inFace.getId() << " name=" << interest.getName() << " :Drop.");
   
+  // get location information
+  auto locationTag = interest.getTag<lp::LocationTag>();
+  ndn::Location ml;
+  ndn::Location pl;
+  ndn::Location dl;
+  double distanceFromMeToDest;
+  double distanceFromPrevToDest;
+  if (locationTag != nullptr) {
+    ml = locationTag->get().getMyLocation();
+    pl = locationTag->get().getPrevLocation();
+    dl = locationTag->get().getDestLocation();
+ 
+    
+    distanceFromMeToDest = calculateDistanceEuclid(dl.getLatitude(), dl.getLongitude(),
+                                             ml.getLatitude(), ml.getLongitude());
+    distanceFromPrevToDest = calculateDistanceEuclid(pl.getLatitude(), pl.getLongitude(),
+                                               dl.getLatitude(), dl.getLongitude());
+    
+    NFD_LOG_DEBUG("MyLocation: " << ml.getLatitude() << "," << ml.getLongitude() << "; PrevLocation: " << pl.getLatitude() << "," << pl.getLongitude() << "; DestLocation: " << dl.getLatitude() << "," << dl.getLongitude());
+  }
+  
   // if we already received this interest and put it in the pool
   if (m_scheduledInterstPool.find(interest.getName()) != m_scheduledInterstPool.end()) {
-    // cancel scheduled interest
-    ns3::Simulator::Cancel(m_scheduledInterstPool[interest.getName()]);
-    // delete interest from m_scheduledInterstPool
-    m_scheduledInterstPool.erase(m_scheduledInterstPool.find(interest.getName()));
-    
-    // delete the corresponding PIT entry 
-    this->rejectPendingInterest(pitEntry);
-    
-    NFD_LOG_DEBUG(interest << ", cancel scheduled interest.");
-    
-    // drop the current interest
-    return;
+    //if (distanceFromMeToDest > distanceFromPrevToDest) {
+      // cancel scheduled interest
+      ns3::Simulator::Cancel(m_scheduledInterstPool[interest.getName()]);
+      // delete interest from m_scheduledInterstPool
+      m_scheduledInterstPool.erase(m_scheduledInterstPool.find(interest.getName()));
+      
+      // delete the corresponding PIT entry 
+      this->rejectPendingInterest(pitEntry);
+      
+      NFD_LOG_DEBUG(interest << ", cancel scheduled interest.");
+      
+      // drop the current interest
+      return;
+    //}
+
   }
 }
 
@@ -156,7 +189,28 @@ ClfStrategy::afterReceiveDataNormal(const shared_ptr<pit::Entry>& pitEntry,
 
   this->sendDataToAll(pitEntry, inFace, data);
 }
- 
+
+void
+ClfStrategy::afterContentStoreHit(const shared_ptr<pit::Entry>& pitEntry,
+                                  const Face& inFace, const Data& data)
+{
+  NFD_LOG_DEBUG("afterContentStoreHit pitEntry=" << pitEntry->getName() <<
+      " inFace=" << inFace.getId() << " data=" << data.getName());
+  // changes related to data suppression // cclf_ds
+  // someone already responded with the data, cancel our scheduled data
+  
+   if (m_scheduledDataPool.find(data.getName()) != m_scheduledDataPool.end()) {
+    // cancel scheduled interest
+    ns3::Simulator::Cancel(m_scheduledDataPool[data.getName()]);
+    m_scheduledDataPool.erase(m_scheduledDataPool.find(data.getName()));
+    
+    NFD_LOG_DEBUG(data.getName() << ", data cancels scheduled data. Also drop the data.");
+    return;
+  }
+  
+  this->sendData(pitEntry, data, inFace);
+}
+
 void
 ClfStrategy::afterReceiveDataClf(const shared_ptr<pit::Entry>& pitEntry,
                                  const Face& inFace, const Data& data)
@@ -173,7 +227,9 @@ ClfStrategy::afterReceiveDataClf(const shared_ptr<pit::Entry>& pitEntry,
 
   // get the name of interest without the last part, version number  
   ndn::Name namePrefix = interest.getName();
+
   
+
   // someone already responded with the data, cancel our scheduled interest
   if (m_scheduledInterstPool.find(data.getName()) != m_scheduledInterstPool.end()) {
     // cancel scheduled interest
@@ -181,7 +237,7 @@ ClfStrategy::afterReceiveDataClf(const shared_ptr<pit::Entry>& pitEntry,
     // delete interest from m_scheduledInterstPool
     m_scheduledInterstPool.erase(m_scheduledInterstPool.find(data.getName()));
     
-    NFD_LOG_DEBUG(data.getName() << ", cancel scheduled interest.");
+    NFD_LOG_DEBUG(data.getName() << ", data cancels scheduled interest.");
   }
   
  
@@ -226,15 +282,73 @@ ClfStrategy::afterReceiveDataClf(const shared_ptr<pit::Entry>& pitEntry,
   }
 
   this->beforeSatisfyInterest(pitEntry, inFace, data);
-
+ 
   this->sendDataToAll(pitEntry, inFace, data);
 }
+
+void
+ClfStrategy::sendDataToAll(const shared_ptr<pit::Entry>& pitEntry, const Face& inFace, const Data& data)
+{
+  std::set<Face*> pendingDownstreams;
+  auto now = time::steady_clock::now();
+
+  NFD_LOG_DEBUG("sendDataToAll pitEntry=" << pitEntry->getName());
+  // remember pending downstreams
+  for (const pit::InRecord& inRecord : pitEntry->getInRecords()) {
+    NFD_LOG_DEBUG("pit::InRecord: " << pitEntry->getName());
+    if (inRecord.getExpiry() > now) {
+      if (inRecord.getFace().getId() == inFace.getId() &&
+          inRecord.getFace().getLinkType() != ndn::nfd::LINK_TYPE_AD_HOC) {
+        continue;
+      }
+      pendingDownstreams.insert(&inRecord.getFace());
+    }
+  }
+
+  double timer = 10; // milliseconds
+  std::random_device rd; // obtain a random number from hardware
+  std::mt19937 eng(rd()); // seed the generator 
+  double lower_bound = timer * 0.5; //5000; //timer * 0.5;
+  double upper_bound =  timer * 1.5; //40000;//timer * 1.5;
+  std::uniform_real_distribution<double> unif(lower_bound,upper_bound);
+  //std::default_random_engine re;
+  double randomTimer = unif(eng);
+  
+  // set final timer to randomTimer and convert it to us.
+  double finalTimer = round(randomTimer * 1000);
+  //double finalTimer = randomTimer;
+
+  for (const Face* pendingDownstream : pendingDownstreams) {
+    NFD_LOG_DEBUG("pendingDownStream: " << pitEntry->getName());
+    // use this for vndn and broadcast
+    //this->sendData(pitEntry, data, *pendingDownstream);
+    
+    // data suppression for cclf_ds
+    if (pendingDownstream->getId() == 257) {
+      NFD_LOG_DEBUG("Scheduling sending data " << data.getName().toUri() << " after " << finalTimer << " us.");
+      ns3::EventId eventId = ns3::Simulator::Schedule(ns3::MicroSeconds(finalTimer), &ClfStrategy::invokeSendData, this, pitEntry, pendingDownstream, data);
+      m_scheduledDataPool[data.getName()] = eventId; 
+    }
+    else { // if local face (258)
+      this->sendData(pitEntry, data, *pendingDownstream);
+    }
+  }
+}
+
+void
+ClfStrategy::invokeSendData(const shared_ptr<pit::Entry>& pitEntry, 
+                          const Face* outFace, const Data& data)
+{
+  NFD_LOG_DEBUG(data.getName().toUri());
+  this->sendData(pitEntry, data, *outFace);
+}
+
+
 
 void
 ClfStrategy::afterReceiveInterestBroadcast(const Face& inFace, const Interest& interest,
                                            const shared_ptr<pit::Entry>& pitEntry)
 {
-  
   auto locationTag = interest.getTag<lp::LocationTag>();
   ndn::Location ml;
   ndn::Location pl;
@@ -259,21 +373,143 @@ ClfStrategy::afterReceiveInterestBroadcast(const Face& inFace, const Interest& i
       isProducer = true; 
     }
   }
-    
+  
+  // get random timer for forwarding
+  double timer = 10; //  we are assuming its in ms
+  std::random_device rd; // obtain a random number from hardware
+  std::mt19937 eng(rd()); // seed the generator 
+  double lower_bound = timer * 0.5;
+  double upper_bound = timer * 1.5;
+  std::uniform_real_distribution<double> unif(lower_bound,upper_bound);
+  //std::default_random_engine re;
+  double randomTimer = unif(eng);
+  
+  // set final timer to randomTimer and convert it to us.
+  double finalTimer = round(randomTimer * 1000);
+   
   for (const auto& nexthop : nexthops) {
-    Face& outFace = nexthop.getFace();
-    if (isProducer && outFace.getLinkType() == ndn::nfd::LINK_TYPE_POINT_TO_POINT) {
+    Face* outFace = &nexthop.getFace();
+    if (isProducer && outFace->getLinkType() == ndn::nfd::LINK_TYPE_POINT_TO_POINT) {
       NFD_LOG_DEBUG(interest << " from=" << inFace.getId()
-                         << " pitEntry-to=" << outFace.getId() << ", outface link type: " << outFace.getLinkType());
-      this->sendInterest(pitEntry, outFace, interest);
+                         << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType());
+      this->sendInterest(pitEntry, *outFace, interest);
       break;
     }
     
-    if (!isProducer && outFace.getLinkType() == ndn::nfd::LINK_TYPE_AD_HOC) {
+    if (!isProducer && outFace->getLinkType() == ndn::nfd::LINK_TYPE_AD_HOC) {
       NFD_LOG_DEBUG(interest << " from=" << inFace.getId()
-                         << " pitEntry-to=" << outFace.getId() << ", outface link type: " << outFace.getLinkType());
-      forwardInterest(interest, pitEntry, &outFace);
+                         << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType());
+      
+      //ns3::EventId eid = ns3::Simulator::Schedule(ns3::MicroSeconds(finalTimer), &ClfStrategy::forwardInterest, this, interest, pitEntry, outFace);
+      forwardInterest(interest, pitEntry, outFace);
       //this->sendInterest(pitEntry, outFace, interest);
+      break;
+    }
+  }
+}
+
+void
+ClfStrategy::afterReceiveInterestBroadcastRandom(const Face& inFace, const Interest& interest,
+                                                 const shared_ptr<pit::Entry>& pitEntry)
+{
+  // get location information
+  auto locationTag = interest.getTag<lp::LocationTag>();
+  ndn::Location ml;
+  ndn::Location pl;
+  ndn::Location dl;
+  
+  if (locationTag != nullptr) {
+    ml = locationTag->get().getMyLocation();
+    pl = locationTag->get().getPrevLocation();
+    dl = locationTag->get().getDestLocation();
+    NFD_LOG_DEBUG("MyLocation: " << ml.getLatitude() << ", " << ml.getLongitude());
+    NFD_LOG_DEBUG("PrevLocation: " << pl.getLatitude() << ", " << pl.getLongitude());
+    NFD_LOG_DEBUG("DestLocation: " << dl.getLatitude() << ", " << dl.getLongitude());
+  }
+  else {
+    NFD_LOG_DEBUG(interest.getName() << ", Consumer node: LocationHeader not found in the interest");
+    // if it is the consumer node, only then it is not going to have location header
+    // need to tag the interest with destLocaton if available
+    ndn::Location myLocation(0,0);
+    ndn::Location prevLocation(0,0);
+    // if there is destination location in prefix to location table 
+    //    destLocation =
+    // else
+          ndn::Location destLocation(0,0);
+     
+    lp::LocationHeader lh;
+    lh.setMyLocation(myLocation);
+    lh.setPrevLocation(prevLocation);
+    lh.setDestLocation(destLocation);
+  
+    NFD_LOG_DEBUG("Adding Location Header to the interst: " << interest.getName());
+
+    interest.setTag(make_shared<lp::LocationTag>(lh));
+    
+    /* setting the tag is not needed for vndn algorithm, but had to add, so that same transport service can be used by all the strategies.*/
+
+    afterReceiveInterestBroadcast(inFace, interest, pitEntry);
+    return;
+  }
+
+  double timer = 0;
+  // calculate timer based on ml and pl
+  if ((ml.getLongitude() != 0 or ml.getLatitude() != 0) and 
+      (pl.getLatitude() != 0 or pl.getLongitude() != 0)) {
+    // get random timer for forwarding
+    timer = 10; //  we are assuming its in ms
+    std::random_device rd; // obtain a random number from hardware
+    std::mt19937 eng(rd()); // seed the generator 
+    double lower_bound = timer * 0.5;
+    double upper_bound = timer * 1.5;
+    std::uniform_real_distribution<double> unif(lower_bound,upper_bound);
+    //std::default_random_engine re;
+    double randomTimer = unif(eng);
+    
+    // set final timer to randomTimer and convert it to us.
+    double finalTimer = round(randomTimer * 1000);
+    timer = finalTimer;
+    timer = 5000;
+  }
+  else {
+     // Don't have location info, just broadcast
+    NFD_LOG_DEBUG("Location info is not available. Broadcast interest: " << interest);
+    afterReceiveInterestBroadcast(inFace, interest, pitEntry);
+    return;
+  }
+  
+  // get forwarding information
+  const fib::Entry& fibEntry = this->lookupFib(*pitEntry);
+  const fib::NextHopList& nexthops = fibEntry.getNextHops();
+     
+  // is this node producer?
+  bool isProducer = false; 
+  for (const auto& nexthop : nexthops) {
+    Face& outFace = nexthop.getFace();
+    if (outFace.getLinkType() == ndn::nfd::LINK_TYPE_POINT_TO_POINT) {
+      isProducer = true; 
+    }
+  }
+   
+  NFD_LOG_DEBUG("Calculated values for " << interest.getName().toUri()  << " : Timer = " << timer << " us.");
+  
+  // forward interest 
+  for (const auto& nexthop : nexthops) {
+    Face* outFace = &nexthop.getFace();
+     if (isProducer && outFace->getLinkType() == ndn::nfd::LINK_TYPE_POINT_TO_POINT) {
+       NFD_LOG_DEBUG(interest << ", Producer Node: from=" << inFace.getId()
+                         << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType());
+ 
+       this->sendInterest(pitEntry, *outFace, interest);
+       break;
+     }
+     
+     if (!isProducer && outFace->getLinkType() == ndn::nfd::LINK_TYPE_AD_HOC) {
+       NFD_LOG_DEBUG(interest << ", Intermediate Node: from=" << inFace.getId()
+                         << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType() << ", scheduled after " << timer << " us.");
+      
+      ns3::EventId eventId = ns3::Simulator::Schedule(ns3::MicroSeconds(timer), &ClfStrategy::forwardInterest, this, interest, pitEntry, outFace);
+      
       break;
     }
   }
@@ -297,10 +533,13 @@ ClfStrategy::forwardInterest(const Interest& interest,
   
   // send the interest
   this->sendInterest(pitEntry, *outFace, interest);
-  
+
   // remove the interest from the pool, because it has been sent.
   m_scheduledInterstPool.erase(interest.getName());
-
+  
+  // send Interest to update the number of neighbors
+  ndn::Interest neighborInterest("/neighbor");
+  //outFace->sendInterest(neighborInterest);
   // TODO: update the score of this prefix
   //info->incrementInterest();
 }
@@ -310,7 +549,7 @@ ClfStrategy::afterReceiveInterestVndn(const Face& inFace, const Interest& intere
                                       const shared_ptr<pit::Entry>& pitEntry)
 {
   // if interest hop count > 5 drop it
-  auto hopCountTag = interest.getTag<lp::HopCountTag>();
+  /*auto hopCountTag = interest.getTag<lp::HopCountTag>();
   if (hopCountTag != nullptr) {
     int hopCount = *hopCountTag;
 
@@ -318,7 +557,7 @@ ClfStrategy::afterReceiveInterestVndn(const Face& inFace, const Interest& intere
       NFD_LOG_DEBUG("Hopcount greater than 5, dropping interest.");
       return;
     }
-  }
+  }*/
 
   // if we already received this interest and put it in the pool
   if (m_scheduledInterstPool.find(interest.getName()) != m_scheduledInterstPool.end()) {
@@ -409,7 +648,7 @@ ClfStrategy::afterReceiveInterestVndn(const Face& inFace, const Interest& intere
     }
   }
    
-  NFD_LOG_DEBUG("DistanceFromMeToPrev = " << distanceFromMetoPrev << ", Timer = " << timer << "us.");
+  NFD_LOG_DEBUG("Calculated values for " << interest.getName().toUri()  << " : DistanceFromMeToPrev = " << distanceFromMetoPrev << ", Timer = " << timer << "us.");
   
   // forward interest 
   for (const auto& nexthop : nexthops) {
@@ -424,7 +663,7 @@ ClfStrategy::afterReceiveInterestVndn(const Face& inFace, const Interest& intere
      
      if (!isProducer && outFace->getLinkType() == ndn::nfd::LINK_TYPE_AD_HOC) {
        NFD_LOG_DEBUG(interest << ", Intermediate Node: from=" << inFace.getId()
-                         << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType() << ", scheduled after " << timer << "ms.");
+                         << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType() << ", scheduled after " << timer << " us.");
       
       //ndn::EventId eventId = scheduler::schedule(waitingTime,
       //                          [this, &interest, pitEntry, &outFace] {forwardInterest(interest, pitEntry,
@@ -695,7 +934,7 @@ ClfStrategy::afterReceiveInterestClf(const Face& inFace, const Interest& interes
   {
     locationScore = getLocationScore(pl, dl, ml);
 
-    weight = ALPHA * (1 - locationScore) + (1-ALPHA) * centralityScore;
+    weight = ALPHA * (locationScore) + (1-ALPHA) * centralityScore;
 
     distanceFromMeToDest = calculateDistanceEuclid(dl.getLatitude(), dl.getLongitude(),
                                              ml.getLatitude(), ml.getLongitude());
@@ -711,7 +950,7 @@ ClfStrategy::afterReceiveInterestClf(const Face& inFace, const Interest& interes
       
       NFD_LOG_DEBUG("DestLocation information is not available in Interest, but available in prefix-location table: (" << dlFromTable.getLatitude() << "," << dlFromTable.getLongitude()  <<  "). Calculating score using both location and centrality score.");
       
-      weight = ALPHA * (1 - locationScore) + (1 - ALPHA) * centralityScore;
+      weight = ALPHA * (locationScore) + (1 - ALPHA) * centralityScore;
     }
     else { // just use centality to calculate the wegiht
       NFD_LOG_DEBUG("DestLocation information is neither available in Interest nor in prefix-location table. Calculating weight only with centrality score.");
@@ -722,7 +961,19 @@ ClfStrategy::afterReceiveInterestClf(const Face& inFace, const Interest& interes
   double timer = 0;
   int finalTimer = 0; 
   if (weight <= 0) { // it means both location score and centrality score is zero. This node just joined the network. So to bootstrap the scores it should broadcast
-    timer = 0;
+    timer = 10;
+    std::random_device rd; // obtain a random number from hardware
+    std::mt19937 eng(rd()); // seed the generator 
+    double lower_bound = timer * 0.5;
+    double upper_bound = timer * 1.5;
+    std::uniform_real_distribution<double> unif(lower_bound,upper_bound);
+    //std::default_random_engine re;
+    double randomTimer = unif(eng);
+    
+    // set final timer to randomTimer and convert it to us.
+    //finalTimer = round(randomTimer * 1000);
+    finalTimer = 0;
+    NFD_LOG_DEBUG("BroadcastTimer: " << finalTimer);
   }
   else {
     // higher the weight, lower the timer (waiting time))
@@ -748,15 +999,17 @@ ClfStrategy::afterReceiveInterestClf(const Face& inFace, const Interest& interes
     double randomTimer = unif(eng);
     
     // set final timer to randomTimer and convert it to us.
-    finalTimer = round(randomTimer * 1000);
+    finalTimer = round(randomTimer * 1000); // originally it is 1000, changed it to 500, 100 for testing
      
+    // set final timer to randomTimer and convert it to ns.
+    //finalTimer = round(randomTimer * 1000000);
+    
     NFD_LOG_DEBUG("Calculating timer. Timer = " << timer << " ms, lower_bound = " << lower_bound << ", upper_bound = " << upper_bound << ", randomTimer = " << randomTimer << ", finalTimer = " << finalTimer << " us.");
+    NFD_LOG_DEBUG("CalculatedTimer: " << finalTimer);
   }
   
-  NFD_LOG_DEBUG("Calculated values: DistanceFromMeToDest = " << distanceFromMeToDest << "; DistanceFromPrevToDest = " << distanceFromPrevToDest  << ". LocationScore = " << locationScore << "; CentralityScore = " << centralityScore << "; Weight = " << weight << "; Timer = " << timer  << " ms; Final Timer = " << finalTimer << " us.");
+  NFD_LOG_DEBUG("Calculated values for " << interest.getName().toUri() << ": DistanceFromMeToDest = " << distanceFromMeToDest << "; DistanceFromPrevToDest = " << distanceFromPrevToDest  << ". LocationScore = " << locationScore << "; CentralityScore = " << centralityScore << "; Weight = " << weight << "; Timer = " << timer  << " ms; Final Timer = " << finalTimer << " us.");
   
-  //timer = finalTimer;// * 10; // multiplying avoids collision
-
   // forward interest 
   for (const auto& nexthop : nexthops) {
      Face* outFace = &nexthop.getFace();
@@ -778,9 +1031,6 @@ ClfStrategy::afterReceiveInterestClf(const Face& inFace, const Interest& interes
        NFD_LOG_DEBUG("Intermediate Node: Interest= " << interest.getName().toUri() << " received from=" << inFace.getId()
                          << " pitEntry-to=" << outFace->getId() << ", outface link type: " << outFace->getLinkType() << ", scheduled after " << finalTimer << " us.");
 
-      //ndn::EventId eventId = scheduler::schedule(waitingTime,
-      //                          [this, &interest, pitEntry, &outFace] {forwardInterest(interest, pitEntry,
-                                                                   /*info,*/ //outFace);});
       ns3::EventId eid = ns3::Simulator::Schedule(ns3::MicroSeconds(finalTimer), &ClfStrategy::forwardInterest, this, interest, pitEntry, outFace);
        
        //this->sendInterest(pitEntry, outFace, interest);
